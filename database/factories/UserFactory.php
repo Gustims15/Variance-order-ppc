@@ -7,15 +7,9 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
-/**
- * @extends Factory<User>
- */
 class UserFactory extends Factory
 {
-    /**
-     * The current password being used by the factory.
-     */
-    protected static ?string $password;
+        protected static ?string $password;
 
     /**
      * Define the model's default state.
@@ -29,12 +23,67 @@ class UserFactory extends Factory
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
+
+            // Default account configuration.
+            'role' => User::ROLE_VIEWER,
+            'is_active' => true,
+
             'remember_token' => Str::random(10),
         ];
     }
 
     /**
-     * Indicate that the model's email address should be unverified.
+     * Administrator account.
+     */
+    public function administrator(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => User::ROLE_ADMINISTRATOR,
+        ]);
+    }
+
+    /**
+     * Manager account.
+     */
+    public function manager(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => User::ROLE_MANAGER,
+        ]);
+    }
+
+    /**
+     * Staff account.
+     */
+    public function staff(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => User::ROLE_STAFF,
+        ]);
+    }
+
+    /**
+     * Viewer account.
+     */
+    public function viewer(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => User::ROLE_VIEWER,
+        ]);
+    }
+
+    /**
+     * Inactive account.
+     */
+    public function inactive(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'is_active' => false,
+        ]);
+    }
+
+    /**
+     * Indicate that the model's email should be unverified.
      */
     public function unverified(): static
     {
