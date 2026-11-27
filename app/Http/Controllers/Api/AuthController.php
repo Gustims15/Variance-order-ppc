@@ -11,9 +11,6 @@ use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
 {
-    /**
-     * Authenticate user and generate Sanctum token.
-     */
     public function login(LoginRequest $request): JsonResponse
     {
         $validated = $request->validated();
@@ -37,7 +34,6 @@ class AuthController extends Controller
             ], 401);
         }
 
-        // Reject inactive accounts.
         if (!$user->isActive()) {
             return response()->json([
                 'success' => false,
@@ -45,7 +41,6 @@ class AuthController extends Controller
             ], 403);
         }
 
-        // Generate device token.
         $deviceName = $validated['device_name']
             ?? 'unknown-device';
 
@@ -68,9 +63,6 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * Revoke current access token.
-     */
     public function logout(Request $request): JsonResponse
     {
         $request->user()
@@ -83,9 +75,6 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * Display authenticated user profile.
-     */
     public function me(Request $request): JsonResponse
     {
         $user = $request->user();

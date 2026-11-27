@@ -15,6 +15,10 @@ class VariancePeriodDetail extends Model
         'forecast_quantity',
         'latest_quantity',
         'variance',
+        'previous_cumulative_quantity',
+        'current_cumulative_quantity',
+        'cumulative_variance',
+        'cum_status',
         'status',
     ];
 
@@ -26,6 +30,9 @@ class VariancePeriodDetail extends Model
             'forecast_quantity' => 'decimal:4',
             'latest_quantity' => 'decimal:4',
             'variance' => 'decimal:4',
+            'previous_cumulative_quantity' => 'decimal:4',
+            'current_cumulative_quantity' => 'decimal:4',
+            'cumulative_variance' => 'decimal:4',
         ];
     }
 

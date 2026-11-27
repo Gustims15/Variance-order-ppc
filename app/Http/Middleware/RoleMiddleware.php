@@ -8,9 +8,6 @@ use Symfony\Component\HttpFoundation\Response;
 
 class RoleMiddleware
 {
-    /**
-     * Handle an incoming request.
-     */
     public function handle(
         Request $request,
         Closure $next,
@@ -19,7 +16,6 @@ class RoleMiddleware
 
         $user = $request->user();
 
-        // Authentication check.
         if (!$user) {
             return response()->json([
                 'success' => false,
@@ -27,7 +23,6 @@ class RoleMiddleware
             ], 401);
         }
 
-        // Active account check.
         if (!$user->isActive()) {
             return response()->json([
                 'success' => false,
@@ -35,7 +30,6 @@ class RoleMiddleware
             ], 403);
         }
 
-        // Reject invalid or missing role configuration.
         if (empty($roles)) {
             return response()->json([
                 'success' => false,
@@ -43,7 +37,6 @@ class RoleMiddleware
             ], 500);
         }
 
-        // Verify user's assigned role.
         if (!in_array($user->role, $roles, true)) {
             return response()->json([
                 'success' => false,

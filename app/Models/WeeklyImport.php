@@ -20,6 +20,8 @@ class WeeklyImport extends Model
         'total_periods',
         'uploaded_at',
         'processed_at',
+        'snapshot_date',
+        'snapshot_week',
         'metadata',
         'error_message',
     ];
@@ -32,6 +34,7 @@ class WeeklyImport extends Model
             'total_periods' => 'integer',
             'uploaded_at' => 'datetime',
             'processed_at' => 'datetime',
+            'snapshot_date' => 'date',
             'metadata' => 'array',
         ];
     }
@@ -59,6 +62,15 @@ class WeeklyImport extends Model
         return $this->hasMany(
             VarianceReport::class,
             'current_import_id',
+            'id'
+        );
+    }
+
+    public function validationIssues(): HasMany
+    {
+        return $this->hasMany(
+            ImportValidationIssue::class,
+            'weekly_import_id',
             'id'
         );
     }

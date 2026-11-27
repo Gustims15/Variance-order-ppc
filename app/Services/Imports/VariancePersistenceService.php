@@ -9,7 +9,8 @@ use RuntimeException;
 
 class VariancePersistenceService
 {
-    private const PERIOD_BATCH_SIZE = 250;
+    // 12 inserted columns x 150 rows = 1800 parameters (SQL Server limit: 2100).
+    private const PERIOD_BATCH_SIZE = 150;
     public function save(
         int $previousImportId,
         int $currentImportId,
@@ -41,11 +42,21 @@ class VariancePersistenceService
         }
 
         if (
-            $previous->import_type !== 'forecast' ||
-            $current->import_type !== 'actual'
+            $previous->import_type !== 'weekly' ||
+            $current->import_type !== 'weekly'
         ) {
             throw new RuntimeException(
-                'Perbandingan harus Forecast vs Actual.'
+                'Perbandingan harus menggunakan dua Weekly Snapshot.'
+            );
+        }
+
+        if (
+            !$previous->snapshot_date ||
+            !$current->snapshot_date ||
+            $previous->snapshot_date->greaterThanOrEqualTo($current->snapshot_date)
+        ) {
+            throw new RuntimeException(
+                'Tanggal snapshot sebelumnya harus lebih awal dari snapshot terbaru.'
             );
         }
 
@@ -80,15 +91,9 @@ class VariancePersistenceService
             }
         }
 
-        $exists = DB::table('variance_reports')
-            ->where('previous_import_id', $previousImportId)
-            ->where('current_import_id', $currentImportId)
-            ->exists();
-
-        if ($exists) {
-            throw new RuntimeException(
-                'Laporan untuk pasangan import ini sudah tersedia.'
-            );
+        $engineSummary['retained'] = $engineSummary['retained'] ?? 0;
+        if (!is_numeric($engineSummary['retained']) || (int) $engineSummary['retained'] < 0) {
+            throw new RuntimeException('Summary engine tidak valid: retained');
         }
 
         $summaryMap = [
@@ -97,6 +102,7 @@ class VariancePersistenceService
             'DECREASED' => 'decreased',
             'MIXED' => 'mixed',
             'UNCHANGED' => 'unchanged',
+            'RETAIN' => 'retained',
             'NEEDS_REVIEW' => 'needs_review',
         ];
 
@@ -106,6 +112,7 @@ class VariancePersistenceService
             'decreased_count' => (int) $engineSummary['decreased'],
             'mixed_count' => (int) $engineSummary['mixed'],
             'unchanged_count' => (int) $engineSummary['unchanged'],
+            'retained_count' => (int) $engineSummary['retained'],
             'needs_review_count' => (int) $engineSummary['needs_review'],
         ];
 
@@ -170,15 +177,26 @@ class VariancePersistenceService
             $expectedTotalChanges
         ) {
 
-            $exists = DB::table('variance_reports')
+            // Serialize revisions for this pair by locking the current import row.
+            WeeklyImport::query()->whereKey($currentImportId)->lockForUpdate()->firstOrFail();
+
+            $latestRevision = DB::table('variance_reports')
                 ->where('previous_import_id', $previousImportId)
                 ->where('current_import_id', $currentImportId)
-                ->exists();
+                ->orderByDesc('revision_number')
+                ->lockForUpdate()
+                ->first();
 
-            if ($exists) {
-                throw new RuntimeException(
-                    'Laporan untuk pasangan import ini sudah tersedia.'
-                );
+            $revisionNumber = $latestRevision
+                ? ((int) $latestRevision->revision_number + 1)
+                : 1;
+            $parentReportId = $latestRevision->id ?? null;
+
+            if ($latestRevision) {
+                DB::table('variance_reports')
+                    ->where('previous_import_id', $previousImportId)
+                    ->where('current_import_id', $currentImportId)
+                    ->update(['is_latest' => false, 'updated_at' => now()]);
             }
 
             $now = now();
@@ -187,6 +205,9 @@ class VariancePersistenceService
                 ->insertGetId([
                     'previous_import_id' => $previousImportId,
                     'current_import_id' => $currentImportId,
+                    'revision_number' => $revisionNumber,
+                    'parent_report_id' => $parentReportId,
+                    'is_latest' => true,
                     'status' => 'processing',
                     'total_products' => count($details),
 
@@ -195,6 +216,7 @@ class VariancePersistenceService
                     'decreased_count' => 0,
                     'mixed_count' => 0,
                     'unchanged_count' => 0,
+                    'retained_count' => 0,
                     'needs_review_count' => 0,
                     'total_changes' => 0,
 
@@ -245,6 +267,39 @@ class VariancePersistenceService
                     $currentSource ??= $sourceRow;
                 }
 
+                // Collect audit metadata from the comparison engine.
+                $auditMetadataKeys = [
+                    'duplicate_count',
+                    'duplicate_source_rows',
+                    'previous_duplicate_count',
+                    'current_duplicate_count',
+                    'previous_source_rows',
+                    'current_source_rows',
+                    'previous_line_numbers',
+                    'current_line_numbers',
+                    'duplicate_line_numbers',
+                    'previous_attributes',
+                    'current_attributes',
+                    'previous_attribute_sets',
+                    'current_attribute_sets',
+                    'previous_duplicate_attribute_sets',
+                    'current_duplicate_attribute_sets',
+                ];
+
+                $auditMetadata = array_intersect_key(
+                    $detail,
+                    array_flip($auditMetadataKeys)
+                );
+
+                $auditMetadataJson = !empty($auditMetadata)
+                    ? json_encode(
+                        $auditMetadata,
+                        JSON_THROW_ON_ERROR
+                            | JSON_UNESCAPED_UNICODE
+                            | JSON_UNESCAPED_SLASHES
+                    )
+                    : null;
+
                 $varianceDetailId = DB::table('variance_details')
                     ->insertGetId([
                         'variance_report_id' => $reportId,
@@ -267,6 +322,7 @@ class VariancePersistenceService
 
                         'status' => $status,
                         'reason' => $reason,
+                        'audit_metadata' => $auditMetadataJson,
 
                         'created_at' => $now,
                         'updated_at' => $now,
@@ -319,12 +375,35 @@ class VariancePersistenceService
                         }
                     }
 
+                    $previousCum = $period['previous_cumulative_quantity'] ?? null;
+                    $currentCum = $period['current_cumulative_quantity'] ?? null;
+                    $cumulativeVariance = $period['cumulative_variance'] ?? null;
+
+                    foreach ([
+                        'previous_cumulative_quantity' => $previousCum,
+                        'current_cumulative_quantity' => $currentCum,
+                        'cumulative_variance' => $cumulativeVariance,
+                    ] as $field => $value) {
+                        if (
+                            $value !== null &&
+                            (!is_numeric($value) || !is_finite((float) $value))
+                        ) {
+                            throw new RuntimeException(
+                                "Nilai {$field} tidak valid pada {$date}."
+                            );
+                        }
+                    }
+
                     $periodBuffer[] = [
                         'variance_detail_id' => $varianceDetailId,
                         'sr_issue_date' => $date,
                         'forecast_quantity' => $forecast,
                         'latest_quantity' => $latest,
                         'variance' => $variance,
+                        'previous_cumulative_quantity' => $previousCum,
+                        'current_cumulative_quantity' => $currentCum,
+                        'cumulative_variance' => $cumulativeVariance,
+                        'cum_status' => $period['cum_status'] ?? 'NOT_CHECKED',
                         'status' => $period['status'] ?? 'NEEDS_REVIEW',
                         'created_at' => $now,
                         'updated_at' => $now,

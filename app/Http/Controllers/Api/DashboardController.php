@@ -10,9 +10,6 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
-    /**
-     * Main dashboard summary.
-     */
     public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -108,6 +105,7 @@ class DashboardController extends Controller
                     'decreased' => $report->decreased_count,
                     'mixed' => $report->mixed_count,
                     'unchanged' => $report->unchanged_count,
+                    'retained' => $report->retained_count,
                     'needs_review' => $report->needs_review_count,
                     'total_changes' => $report->total_changes,
                     'pending_reviews' => $reviewCount,
@@ -126,9 +124,6 @@ class DashboardController extends Controller
         ]);
     }
 
-    /**
-     * Forecast vs Actual period trend.
-     */
     public function trends(Request $request): JsonResponse
     {
         $validated = $request->validate([

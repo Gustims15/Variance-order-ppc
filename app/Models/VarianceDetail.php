@@ -25,6 +25,7 @@ class VarianceDetail extends Model
         'total_variance',
         'status',
         'reason',
+        'audit_metadata',
     ];
 
     protected function casts(): array
@@ -36,6 +37,7 @@ class VarianceDetail extends Model
             'previous_total' => 'decimal:4',
             'current_total' => 'decimal:4',
             'total_variance' => 'decimal:4',
+            'audit_metadata' => 'array',
         ];
     }
 

@@ -25,9 +25,6 @@ class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
 
-    /**
-     * Available user roles.
-     */
     public const ROLE_ADMINISTRATOR = 'administrator';
 
     public const ROLE_MANAGER = 'manager';
@@ -36,9 +33,6 @@ class User extends Authenticatable
 
     public const ROLE_VIEWER = 'viewer';
 
-    /**
-     * Available roles.
-     */
     public const AVAILABLE_ROLES = [
         self::ROLE_ADMINISTRATOR,
         self::ROLE_MANAGER,
@@ -46,9 +40,6 @@ class User extends Authenticatable
         self::ROLE_VIEWER,
     ];
 
-    /**
-     * Attribute casting.
-     */
     protected function casts(): array
     {
         return [
@@ -58,17 +49,11 @@ class User extends Authenticatable
         ];
     }
 
-    /**
-     * Check whether the account is active.
-     */
     public function isActive(): bool
     {
         return $this->is_active === true;
     }
 
-    /**
-     * Check whether user is administrator.
-     */
     public function isAdministrator(): bool
     {
         return $this->hasRole(self::ROLE_ADMINISTRATOR);
@@ -88,17 +73,11 @@ class User extends Authenticatable
         );
     }
 
-    /**
-     * Check whether user has any of the specified roles.
-     */
     public function hasAnyRole(array $roles): bool
     {
         return $this->hasRole($roles);
     }
 
-    /**
-     * Check whether user can manage users.
-     */
     public function canManageUsers(): bool
     {
         return $this->isAdministrator();

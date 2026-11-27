@@ -12,9 +12,6 @@ use Illuminate\Validation\Rule;
 
 class ReviewController extends Controller
 {
-    /**
-     * Display review items with filters, search and pagination.
-     */
     public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -50,7 +47,6 @@ class ReviewController extends Controller
             'varianceReport',
         ]);
 
-        // Filter by report ID.
         if (!empty($validated['report_id'])) {
             $query->where(
                 'variance_report_id',
@@ -58,7 +54,6 @@ class ReviewController extends Controller
             );
         }
 
-        // Filter by review status.
         if (!empty($validated['status'])) {
             $query->where(
                 'status',
@@ -66,7 +61,6 @@ class ReviewController extends Controller
             );
         }
 
-        // Filter by department.
         if (!empty($validated['department'])) {
             $query->whereHas(
                 'varianceDetail',
@@ -79,8 +73,6 @@ class ReviewController extends Controller
             );
         }
 
-        // Search by SR number, product code,
-        // product name, department or review reason.
         if (!empty($validated['keyword'])) {
             $keyword = trim($validated['keyword']);
 
@@ -126,7 +118,6 @@ class ReviewController extends Controller
             }
         }
 
-        // Paginate results and preserve query parameters.
         $reviews = $query
             ->latest('id')
             ->paginate($validated['per_page'] ?? 20)
@@ -138,10 +129,6 @@ class ReviewController extends Controller
         ]);
     }
 
-
-/**
- * Display review statistics.
- */
 public function statistics(Request $request): JsonResponse
 {
     $validated = $request->validate([
@@ -152,7 +139,6 @@ public function statistics(Request $request): JsonResponse
         ],
     ]);
 
-    // Base query.
     $baseQuery = DB::table('review_items as ri');
 
     if (!empty($validated['report_id'])) {
@@ -162,7 +148,6 @@ public function statistics(Request $request): JsonResponse
         );
     }
 
-    // Calculate summary.
     $summary = (clone $baseQuery)
         ->selectRaw('COUNT(*) as total_reviews')
         ->selectRaw("
@@ -179,12 +164,10 @@ public function statistics(Request $request): JsonResponse
     $pending = (int) ($summary->pending ?? 0);
     $resolved = (int) ($summary->resolved ?? 0);
 
-    // Calculate resolution rate.
     $resolutionRate = $total > 0
         ? round(($resolved / $total) * 100, 2)
         : 0;
 
-    // Group by review reason.
     $reasonDistribution = (clone $baseQuery)
         ->select('ri.reason')
         ->selectRaw('COUNT(*) as total')
@@ -197,7 +180,6 @@ public function statistics(Request $request): JsonResponse
         ])
         ->values();
 
-    // Group by department.
     $departmentStatistics = (clone $baseQuery)
         ->leftJoin(
             'variance_details as vd',
@@ -247,10 +229,6 @@ public function statistics(Request $request): JsonResponse
     ]);
 }
 
-
-    /**
-     * Display a single review item.
-     */
     public function show(int $id): JsonResponse
     {
         $review = ReviewItem::with([
@@ -321,9 +299,6 @@ public function statistics(Request $request): JsonResponse
         ]);
     }
 
-    /**
-     * Resolve a pending review and create audit history.
-     */
     public function resolve(
         Request $request,
         int $id
@@ -392,9 +367,6 @@ public function statistics(Request $request): JsonResponse
         ]);
     }
 
-    /**
-     * Reopen a resolved review and create audit history.
-     */
     public function reopen(int $id): JsonResponse
     {
         $review = DB::transaction(function () use ($id) {
@@ -447,9 +419,6 @@ public function statistics(Request $request): JsonResponse
         ]);
     }
 
-    /**
-     * Display audit history for a review item.
-     */
     public function history(int $id): JsonResponse
     {
         $review = ReviewItem::findOrFail($id);
@@ -466,9 +435,6 @@ public function statistics(Request $request): JsonResponse
     }
 
 
-    /**
-     * Resolve multiple pending reviews atomically.
-     */
     public function bulkResolve(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -495,7 +461,6 @@ public function statistics(Request $request): JsonResponse
                 ->lockForUpdate()
                 ->get();
 
-            // Validate all records before making changes.
             $invalid = $reviews->where('status', '!=', 'pending');
 
             if ($invalid->isNotEmpty()) {
@@ -552,9 +517,6 @@ public function statistics(Request $request): JsonResponse
         ]);
     }
 
-    /**
-     * Reopen multiple resolved reviews atomically.
-     */
     public function bulkReopen(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -575,7 +537,6 @@ public function statistics(Request $request): JsonResponse
                 ->lockForUpdate()
                 ->get();
 
-            // Validate all records before making changes.
             $invalid = $reviews->where('status', '!=', 'resolved');
 
             if ($invalid->isNotEmpty()) {

@@ -24,7 +24,6 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
 
-            // Default account configuration.
             'role' => User::ROLE_VIEWER,
             'is_active' => true,
 
@@ -32,9 +31,6 @@ class UserFactory extends Factory
         ];
     }
 
-    /**
-     * Administrator account.
-     */
     public function administrator(): static
     {
         return $this->state(fn (array $attributes) => [
@@ -42,9 +38,6 @@ class UserFactory extends Factory
         ]);
     }
 
-    /**
-     * Manager account.
-     */
     public function manager(): static
     {
         return $this->state(fn (array $attributes) => [
@@ -52,9 +45,6 @@ class UserFactory extends Factory
         ]);
     }
 
-    /**
-     * Staff account.
-     */
     public function staff(): static
     {
         return $this->state(fn (array $attributes) => [
@@ -62,9 +52,6 @@ class UserFactory extends Factory
         ]);
     }
 
-    /**
-     * Viewer account.
-     */
     public function viewer(): static
     {
         return $this->state(fn (array $attributes) => [
@@ -72,9 +59,6 @@ class UserFactory extends Factory
         ]);
     }
 
-    /**
-     * Inactive account.
-     */
     public function inactive(): static
     {
         return $this->state(fn (array $attributes) => [
@@ -82,9 +66,6 @@ class UserFactory extends Factory
         ]);
     }
 
-    /**
-     * Indicate that the model's email should be unverified.
-     */
     public function unverified(): static
     {
         return $this->state(fn (array $attributes) => [

@@ -13,6 +13,10 @@ class OrderPeriod extends Model
         'imported_order_id',
         'sr_issue_date',
         'quantity',
+        'cumulative_quantity',
+        'expected_cumulative_quantity',
+        'cum_status',
+        'cum_difference',
     ];
 
     protected function casts(): array
@@ -21,6 +25,9 @@ class OrderPeriod extends Model
             'imported_order_id' => 'integer',
             'sr_issue_date' => 'date',
             'quantity' => 'decimal:4',
+            'cumulative_quantity' => 'decimal:4',
+            'expected_cumulative_quantity' => 'decimal:4',
+            'cum_difference' => 'decimal:4',
         ];
     }
 

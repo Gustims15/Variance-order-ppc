@@ -1,3 +1,4 @@
+
 <?php
 
 use Illuminate\Database\Migrations\Migration;
@@ -8,15 +9,15 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('review_item_histories', function (Blueprint $table) {
-            //
+        Schema::table('variance_details', function (Blueprint $table) {
+            $table->json('audit_metadata')->nullable();
         });
     }
 
     public function down(): void
     {
-        Schema::table('review_item_histories', function (Blueprint $table) {
-            //
+        Schema::table('variance_details', function (Blueprint $table) {
+            $table->dropColumn('audit_metadata');
         });
     }
 };

@@ -8,9 +8,6 @@ use Symfony\Component\HttpFoundation\Response;
 
 class CheckActiveUser
 {
-    /**
-     * Handle an incoming request.
-     */
     public function handle(
         Request $request,
         Closure $next
@@ -26,7 +23,6 @@ class CheckActiveUser
         }
 
         if (!$user->isActive()) {
-            // Revoke the current Sanctum token.
             $user->currentAccessToken()
                 ?->delete();
 

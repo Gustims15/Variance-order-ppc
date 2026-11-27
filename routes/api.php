@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\VarianceController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ReviewController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\ImportActualController;
+use App\Http\Controllers\Api\WeeklyRecapController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -100,7 +102,21 @@ Route::middleware([
         Route::post('/', [ImportController::class, 'store'])
             ->middleware('role:administrator,manager,staff');
 
-    });
+        Route::post('/preview', [ImportController::class, 'preview'])
+            ->middleware('role:administrator,manager,staff');
+
+        Route::get('/{id}/actual', [ImportActualController::class, 'show'])
+            ->whereNumber('id')
+            ->middleware('role:administrator,manager,staff');
+
+        Route::patch('/{id}/actual', [ImportActualController::class, 'update'])
+            ->whereNumber('id')
+            ->middleware('role:administrator,manager,staff');
+
+        Route::get('/weekly-recap', WeeklyRecapController::class)
+            ->middleware('role:administrator,manager,staff,viewer');
+
+            });
 
     /*
     |--------------------------------------------------------------------------

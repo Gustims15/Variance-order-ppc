@@ -12,8 +12,8 @@ use Throwable;
 
 class ImportPersistenceService
 {
-
-    private const PERIOD_BATCH_SIZE = 400;
+    private const PERIOD_BATCH_SIZE = 200;
+    private const VALIDATION_BATCH_SIZE = 150;
 
     public function __construct(
         private readonly PemiIsuzuReader $reader
@@ -21,14 +21,29 @@ class ImportPersistenceService
 
     public function import(
         string|UploadedFile $file,
-        string $importType
+        string $importType,
+        string $snapshotDate
     ): WeeklyImport {
 
         $importType = strtolower(trim($importType));
 
-        if (!in_array($importType, ['forecast', 'actual'], true)) {
+        if ($importType !== 'weekly') {
             throw new RuntimeException(
-                'Jenis import harus forecast atau actual.'
+                'Jenis import harus weekly.'
+            );
+        }
+
+        $date = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d',
+            $snapshotDate
+        );
+
+        if (
+            !$date ||
+            $date->format('Y-m-d') !== $snapshotDate
+        ) {
+            throw new RuntimeException(
+                'Tanggal snapshot tidak valid.'
             );
         }
 
@@ -42,9 +57,12 @@ class ImportPersistenceService
             );
         }
 
-        $extension = strtolower(
-            pathinfo($filePath, PATHINFO_EXTENSION)
-        );
+        // UploadedFile::getRealPath() menunjuk ke file sementara PHP
+        // (contoh: C:\\Windows\\Temp\\phpXXXX.tmp), bukan nama file asli.
+        // Karena itu, ambil ekstensi dari nama file asli saat upload.
+        $extension = $file instanceof UploadedFile
+            ? strtolower($file->getClientOriginalExtension())
+            : strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
 
         if (!in_array($extension, ['xls', 'xlsx', 'xlsm'], true)) {
             throw new RuntimeException(
@@ -66,7 +84,21 @@ class ImportPersistenceService
             );
         }
 
-        $snapshot = $this->reader->read($filePath);
+        if (
+            WeeklyImport::whereDate(
+                'snapshot_date',
+                $snapshotDate
+            )
+            ->where('status', 'completed')
+            ->exists()
+        ) {
+            throw new RuntimeException(
+                'Snapshot untuk tanggal ini sudah tersedia. '
+                . 'Gunakan mekanisme revisi untuk memperbaiki data.'
+            );
+        }
+
+        $snapshot = $this->reader->read($filePath, $snapshotDate);
 
         $this->validateSnapshot($snapshot);
 
@@ -92,39 +124,62 @@ class ImportPersistenceService
         }
 
         try {
-
             return DB::transaction(function () use (
                 $snapshot,
                 $fileHash,
-                $importType,
                 $extension,
                 $originalFilename,
-                $storedPath
+                $storedPath,
+                $snapshotDate
             ) {
 
-                if (WeeklyImport::where(
-                    'file_hash',
-                    $fileHash
-                )->lockForUpdate()->exists()) {
-
+                if (
+                    WeeklyImport::where('file_hash', $fileHash)
+                        ->lockForUpdate()
+                        ->exists()
+                ) {
                     throw new RuntimeException(
                         'File ini sudah pernah di-upload.'
                     );
                 }
 
+                if (
+                    WeeklyImport::whereDate(
+                        'snapshot_date',
+                        $snapshotDate
+                    )
+                    ->where('status', 'completed')
+                    ->lockForUpdate()
+                    ->exists()
+                ) {
+                    throw new RuntimeException(
+                        'Snapshot tanggal ini sudah tersedia.'
+                    );
+                }
+
+                $date = new \DateTimeImmutable($snapshotDate);
+
+                $snapshotWeek = sprintf(
+                    '%d-W%02d',
+                    (int) $date->format('o'),
+                    (int) $date->format('W')
+                );
+
                 $import = WeeklyImport::create([
                     'original_filename' => $originalFilename,
                     'file_hash' => $fileHash,
-                    'import_type' => $importType,
+                    'import_type' => 'weekly',
                     'file_type' => $extension,
                     'status' => 'processing',
+
+                    'snapshot_date' => $snapshotDate,
+                    'snapshot_week' => $snapshotWeek,
 
                     'total_worksheets' => count(
                         $snapshot['worksheets']
                     ),
 
                     'total_products' => $snapshot['total_products'],
-
                     'total_periods' => $snapshot['total_periods'],
 
                     'uploaded_at' => now(),
@@ -133,11 +188,16 @@ class ImportPersistenceService
                         'storage_path' => $storedPath,
                         'reader' => 'PemiIsuzuReader',
                         'hash_algorithm' => 'SHA-256',
-                        'batch_size' => self::PERIOD_BATCH_SIZE,
+                        'period_batch_size' => self::PERIOD_BATCH_SIZE,
+                        'validation_batch_size' => self::VALIDATION_BATCH_SIZE,
+                        'snapshot_mode' => 'rolling_weekly',
+                        'comparison_scope' => 'all',
+                        'missing_product_policy' => 'retain',
                     ],
                 ]);
 
                 $periodRows = [];
+                $validationRows = [];
 
                 $batchTimestamp = now();
 
@@ -165,7 +225,6 @@ class ImportPersistenceService
                             'sha256',
                             json_encode([
                                 $department,
-                                $srNumber,
                                 $productCode,
                             ], JSON_UNESCAPED_UNICODE)
                         );
@@ -185,45 +244,98 @@ class ImportPersistenceService
                         ]);
 
                         foreach (
-                            $product['quantities'] as $date => $quantity
+                            $product['quantities'] as $periodDate => $quantity
                         ) {
+
+                            $expectedCum =
+                                $product['expected_cumulative_quantities'][$periodDate]
+                                ?? null;
+
+                            $cum =
+                                $product['cumulative_quantities'][$periodDate]
+                                ?? null;
+
+                            $cumStatus =
+                                $product['cum_statuses'][$periodDate]
+                                ?? 'NOT_CHECKED';
+
+                            $cumDifference = (
+                                $cum === null ||
+                                $expectedCum === null
+                            )
+                                ? null
+                                : (float) $cum - (float) $expectedCum;
 
                             $periodRows[] = [
                                 'imported_order_id' => $order->id,
-                                'sr_issue_date' => $date,
+                                'sr_issue_date' => $periodDate,
                                 'quantity' => $quantity,
+                                'cumulative_quantity' => $cum,
+                                'expected_cumulative_quantity' => $expectedCum,
+                                'cum_status' => $cumStatus,
+                                'cum_difference' => $cumDifference,
                                 'created_at' => $batchTimestamp,
                                 'updated_at' => $batchTimestamp,
                             ];
 
                             if (
-                                count($periodRows)
-                                >= self::PERIOD_BATCH_SIZE
+                                count($periodRows) >= self::PERIOD_BATCH_SIZE
                             ) {
-
-                                DB::table('order_periods')->insert(
-                                    $periodRows
-                                );
+                                DB::table('order_periods')
+                                    ->insert($periodRows);
 
                                 $periodRows = [];
+                            }
+                        }
+
+                        foreach (
+                            ($product['validation_issues'] ?? []) as $issue
+                        ) {
+
+                            $validationRows[] = [
+                                'weekly_import_id' => $import->id,
+                                'imported_order_id' => $order->id,
+                                'sr_issue_date' => $issue['sr_issue_date'] ?? null,
+                                'source_row' => $issue['source_row'] ?? null,
+                                'issue_type' => $issue['issue_type'],
+                                'expected_value' => $issue['expected_value'] ?? null,
+                                'actual_value' => $issue['actual_value'] ?? null,
+                                'difference' => $issue['difference'] ?? null,
+                                'status' => 'pending',
+                                'metadata' => json_encode(
+                                    $issue['metadata'] ?? [],
+                                    JSON_UNESCAPED_UNICODE
+                                ),
+                                'created_at' => $batchTimestamp,
+                                'updated_at' => $batchTimestamp,
+                            ];
+
+                            if (
+                                count($validationRows)
+                                >= self::VALIDATION_BATCH_SIZE
+                            ) {
+                                DB::table('import_validation_issues')
+                                    ->insert($validationRows);
+
+                                $validationRows = [];
                             }
                         }
                     }
                 }
 
                 if (!empty($periodRows)) {
+                    DB::table('order_periods')
+                        ->insert($periodRows);
+                }
 
-                    DB::table('order_periods')->insert(
-                        $periodRows
-                    );
-
-                    $periodRows = [];
+                if (!empty($validationRows)) {
+                    DB::table('import_validation_issues')
+                        ->insert($validationRows);
                 }
 
                 $import->update([
                     'status' => 'completed',
                     'processed_at' => now(),
-
                     'total_products' => ImportedOrder::where(
                         'weekly_import_id',
                         $import->id
@@ -271,7 +383,8 @@ class ImportPersistenceService
                 if (
                     empty($product['product_code']) ||
                     !isset($product['line_number']) ||
-                    !isset($product['quantities'])
+                    !isset($product['quantities']) ||
+                    !is_array($product['quantities'])
                 ) {
                     throw new RuntimeException(
                         'Data produk tidak lengkap pada worksheet '
@@ -279,22 +392,22 @@ class ImportPersistenceService
                     );
                 }
 
-                foreach ($product['quantities'] as $date => $quantity) {
+                foreach ($product['quantities'] as $periodDate => $quantity) {
 
                     $parsedDate = \DateTimeImmutable::createFromFormat(
                         '!Y-m-d',
-                        $date
+                        $periodDate
                     );
 
                     if (
                         !$parsedDate ||
-                        $parsedDate->format('Y-m-d') !== $date ||
+                        $parsedDate->format('Y-m-d') !== $periodDate ||
                         !is_numeric($quantity) ||
                         !is_finite((float) $quantity)
                     ) {
                         throw new RuntimeException(
                             'Tanggal atau quantity tidak valid: '
-                            . $date
+                            . $periodDate
                         );
                     }
                 }
